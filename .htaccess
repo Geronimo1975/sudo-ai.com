@@ -1,4 +1,14 @@
+# Redirect homepage to index3.html
+RewriteEngine On
+RewriteBase /
+RewriteCond %{REQUEST_URI} ^/$
+RewriteRule ^$ /index3.html [L]
+
+# Ensure proper handling of direct access to index3.html
+RewriteCond %{THE_REQUEST} ^[A-Z]{3,}\s/+index3\.html[\s?] [NC]
+RewriteRule ^ / [R=301,L]
+
 # Redirect from root to index3.html
-DirectoryIndex index3.html index.html
+DirectoryIndex index3.html
 # SAU
-# Redirect 301 / /index3.html 
+Redirect 301 / /index3.html 
