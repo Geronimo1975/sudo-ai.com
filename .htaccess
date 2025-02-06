@@ -17,22 +17,10 @@ Redirect 301 / /index3.html
 RewriteEngine On
 RewriteBase /
 
-# Redirecționare către index.html ca pagină principală
+# Setare index.html ca pagină principală
 DirectoryIndex index.html
 
-# Redirecționare de la index3.html către pagina principală
-RewriteCond %{THE_REQUEST} ^[A-Z]{3,}\s/+index3\.html[\s?] [NC]
-RewriteRule ^ / [R=301,L]
-
-# Redirecționare de la index-one-page.html către pagina principală
-RewriteCond %{THE_REQUEST} ^[A-Z]{3,}\s/+index-one-page\.html[\s?] [NC]
-RewriteRule ^ / [R=301,L]
-
-# Redirecționare de la index3-one-page.html către pagina principală
-RewriteCond %{THE_REQUEST} ^[A-Z]{3,}\s/+index3-one-page\.html[\s?] [NC]
-RewriteRule ^ / [R=301,L]
-
-# Asigură-te că accesul direct la index.html este redirecționat către /
+# Redirecționare de la index.html către /
 RewriteCond %{THE_REQUEST} ^[A-Z]{3,}\s/+index\.html[\s?] [NC]
 RewriteRule ^ / [R=301,L]
 
