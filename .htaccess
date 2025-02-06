@@ -11,4 +11,32 @@ RewriteRule ^ / [R=301,L]
 # Redirect from root to index3.html
 DirectoryIndex index3.html
 # SAU
-Redirect 301 / /index3.html 
+Redirect 301 / /index3.html
+
+# Activare modul rewrite
+RewriteEngine On
+RewriteBase /
+
+# Redirecționare către index.html ca pagină principală
+DirectoryIndex index.html
+
+# Redirecționare de la index3.html către pagina principală
+RewriteCond %{THE_REQUEST} ^[A-Z]{3,}\s/+index3\.html[\s?] [NC]
+RewriteRule ^ / [R=301,L]
+
+# Redirecționare de la index-one-page.html către pagina principală
+RewriteCond %{THE_REQUEST} ^[A-Z]{3,}\s/+index-one-page\.html[\s?] [NC]
+RewriteRule ^ / [R=301,L]
+
+# Redirecționare de la index3-one-page.html către pagina principală
+RewriteCond %{THE_REQUEST} ^[A-Z]{3,}\s/+index3-one-page\.html[\s?] [NC]
+RewriteRule ^ / [R=301,L]
+
+# Asigură-te că accesul direct la index.html este redirecționat către /
+RewriteCond %{THE_REQUEST} ^[A-Z]{3,}\s/+index\.html[\s?] [NC]
+RewriteRule ^ / [R=301,L]
+
+# Menține URL-ul curat
+RewriteCond %{REQUEST_FILENAME} !-f
+RewriteCond %{REQUEST_FILENAME} !-d
+RewriteRule ^(.*)$ index.html [L] 
