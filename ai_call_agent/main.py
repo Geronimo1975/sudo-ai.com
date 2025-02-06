@@ -1,9 +1,9 @@
-from fastapi import FastAPI, Request, File, UploadFile, HTTPException
+from fastapi import FastAPI, Request, File, UploadFile, HTTPException, WebSocket, Depends
 from fastapi.middleware.cors import CORSMiddleware
 import logging
 import os
 from dotenv import load_dotenv
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, FileResponse
 from fastapi.websockets import WebSocket
 import uuid
 from pathlib import Path
@@ -17,10 +17,21 @@ import tempfile
 import starlette.websockets
 from random import choice
 import json
-from services.dialogflow_service import DialogflowService
+from ai_call_agent.services.dialogflow_service import DialogflowService
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
-from call_handler import CallHandler
+from .call_handler import CallHandler
+from ai_call_agent.services.llm_service import LLMService
+from ai_call_agent.services.rag_service import RAGService
+from gtts import gTTS
+from typing import Dict, Any, Optional
+from sqlalchemy import create_engine, Column, String, DateTime, Boolean, Text
+from sqlalchemy.ext.declarative import declarative_base
+from sqlalchemy.orm import sessionmaker, Session
+from datetime import datetime
+import jwt
+import sounddevice as sd
+import asyncio
 
 # Găsim calea către fișierul .env
 env_path = Path(__file__).parent / '.env'
@@ -31,7 +42,10 @@ if not env_path.exists():
 load_dotenv(dotenv_path=env_path)
 
 # Configurare logging
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
 logger = logging.getLogger(__name__)
 
 # Inițializare Dialogflow
@@ -42,7 +56,7 @@ app = FastAPI()
 # Configurare CORS
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=["*"],  # În producție, specifică domeniile exacte
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -166,147 +180,220 @@ app.mount("/static", StaticFiles(directory="static"), name="static")
 # Initialize call handler
 call_handler = CallHandler()
 
+# Initialize LLM service
+llm_service = LLMService()
+
+# Initialize RAG service
+try:
+    logger.info("Initializing RAG service...")
+    rag_service = RAGService()
+    logger.info("RAG service initialized successfully")
+except Exception as e:
+    logger.error(f"Failed to initialize RAG service: {str(e)}")
+    raise
+
 class Message(BaseModel):
     text: str
-    session_id: str = None
+    session_id: str | None = None
 
 @app.get("/")
-async def root():
-    return {"message": "AI Call Agent API is running"}
+async def read_root():
+    return FileResponse("static/index.html")
 
 @app.post("/api/chat")
-async def chat(message: Message):
+async def chat(request: Request):
     try:
-        response = await call_handler.handle_message(
-            text=message.text,
-            session_id=message.session_id
-        )
+        body = await request.json()
+        message = body.get("message")
         
-        if "error" in response:
-            raise HTTPException(status_code=500, detail=response["error"])
+        if not message:
+            raise HTTPException(status_code=400, detail="Message is required")
             
-        return response
+        logger.info(f"Received message: {message}")
+        response = await rag_service.get_response(message)
         
+        return JSONResponse({
+            "response": response["text"],
+            "source": response.get("source", "unknown")
+        })
+        
+    except json.JSONDecodeError:
+        logger.error("Invalid JSON")
+        raise HTTPException(status_code=400, detail="Invalid JSON")
     except Exception as e:
+        logger.error(f"Chat error: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.websocket("/ws/call")
+@app.post("/api/voice")
+async def voice_chat(request: Request):
+    try:
+        # Pentru moment, dezactivăm procesarea vocală
+        return JSONResponse({
+            "response": "Voice chat is currently disabled. Please use text chat.",
+            "source": "system"
+        })
+    except Exception as e:
+        logger.error(f"Voice chat error: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+# Database configuration
+DB_USER = os.getenv("DB_USER", "postgres")
+DB_PASSWORD = os.getenv("DB_PASSWORD", "Secret1975")
+DB_NAME = "ai-call-agency"
+DB_HOST = os.getenv("DB_HOST", "localhost")
+DB_PORT = os.getenv("DB_PORT", "5432")
+
+SQLALCHEMY_DATABASE_URL = f"postgresql://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_NAME}"
+
+# Initialize SQLAlchemy
+engine = create_engine(SQLALCHEMY_DATABASE_URL)
+SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+Base = declarative_base()
+
+# Models
+class User(Base):
+    __tablename__ = "users"
+    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    name = Column(String, nullable=False)
+    email = Column(String, unique=True, nullable=True)
+    gdpr_accepted = Column(Boolean, default=False)
+    gdpr_accepted_date = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+class ChatSession(Base):
+    __tablename__ = "chat_sessions"
+    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    user_id = Column(String, nullable=True)
+    start_time = Column(DateTime, default=datetime.utcnow)
+    end_time = Column(DateTime, nullable=True)
+    transcript = Column(Text, default="")
+    voice_enabled = Column(Boolean, default=False)
+    video_enabled = Column(Boolean, default=False)
+
+Base.metadata.create_all(bind=engine)
+
+# Dependency for database sessions
+def get_db():
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
+
+# GDPR consent model
+class GDPRConsent(BaseModel):
+    user_name: str
+    consent: bool
+
+# Store active connections
+active_connections: Dict[str, Dict[str, Any]] = {}
+
+@app.post("/api/gdpr-consent")
+async def submit_gdpr_consent(consent: GDPRConsent, db: Session = Depends(get_db)):
+    if not consent.consent:
+        raise HTTPException(status_code=400, detail="GDPR consent is required")
+    
+    user_id = generate_user_id()  # Implement user ID generation
+    user = User(
+        id=user_id,
+        name=consent.user_name,
+        gdpr_accepted=True,
+        gdpr_accepted_date=datetime.utcnow()
+    )
+    db.add(user)
+    db.commit()
+    
+    token = create_access_token(user_id)  # Implement JWT token creation
+    return {"token": token, "user_id": user_id}
+
+@app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
     await websocket.accept()
-    logger.info("WebSocket connection accepted")
+    
+    # Create new session
+    db = SessionLocal()
+    session = ChatSession()
+    db.add(session)
+    db.commit()
+    
+    client_id = session.id
+    active_connections[client_id] = {
+        "websocket": websocket,
+        "session": session,
+        "transcript": []
+    }
+    
     try:
         while True:
-            # Primim audio de la client
-            try:
-                message = await websocket.receive()
-                session_id = str(uuid.uuid4())  # Generăm un ID unic pentru sesiune
-                if message["type"] == "websocket.disconnect":
-                    logger.info("Client disconnected normally")
-                    break
-                
-                if message["type"] != "websocket.receive":
-                    continue
-                
-                audio_data = message.get("bytes")
-                if not audio_data:
-                    continue
-            except Exception as e:
-                logger.error(f"Error receiving message: {str(e)}")
-                continue
+            data = await websocket.receive_json()
+            logger.info(f"Received websocket data: {data}")
             
-            # Salvăm temporar audio-ul WebM
-            with tempfile.NamedTemporaryFile(suffix='.webm', delete=False) as webm_file:
-                webm_file.write(audio_data)
-                webm_path = webm_file.name
-            
-            logger.info(f"Received audio chunk, size: {len(audio_data)} bytes")
-            
-            try:
-                # Convertim WebM în WAV folosind ffmpeg
-                wav_path = webm_path.replace('.webm', '.wav')
-                result = subprocess.run([
-                    'ffmpeg', '-i', webm_path,
-                    '-acodec', 'pcm_s16le',
-                    '-ar', '16000',
-                    '-ac', '1',
-                    '-y',
-                    wav_path
-                ], capture_output=True, text=True)
-                
-                if result.returncode != 0:
-                    logger.error(f"FFmpeg error: {result.stderr}")
-                    continue
-                
-                # Procesăm audio-ul
-                recognizer = sr.Recognizer()
-                recognizer.energy_threshold = 300  # Ajustăm sensibilitatea
-                recognizer.dynamic_energy_threshold = True
-                recognizer.dynamic_energy_adjustment_damping = 0.15
-                recognizer.dynamic_energy_ratio = 1.5
-                recognizer.pause_threshold = 0.8  # Ajustăm pauza între cuvinte
-                
-                with sr.AudioFile(wav_path) as source:
-                    # Ajustăm pentru zgomot de fundal
-                    recognizer.adjust_for_ambient_noise(source, duration=0.5)
-                    audio = recognizer.record(source)
-                    try:
-                        transcription = recognizer.recognize_google(audio, language='en-US')
-                        logger.info(f"Transcription successful: {transcription}")
-                    except sr.UnknownValueError:
-                        logger.warning("Speech Recognition could not understand audio")
-                        continue
-                    except sr.RequestError as e:
-                        logger.error(f"Could not request results from Speech Recognition service; {e}")
-                        continue
-                    
-                    # Folosim Dialogflow pentru răspuns
-                    dialog_response = dialogflow.detect_intent(session_id, transcription)
-                    ai_response = dialog_response["response_messages"][0]["text"]
-                
-                response = {
-                    "type": "transcription",
-                    "text": transcription,
-                    "response": ai_response
+            if "message" in data:
+                # Save user message to transcript
+                message = {
+                    "sender": "user",
+                    "content": data["message"],
+                    "timestamp": datetime.utcnow().isoformat()
                 }
-                await websocket.send_json(response)
-            
-            finally:
-                # Curățăm fișierele temporare
-                try:
-                    if os.path.exists(webm_path):
-                        os.unlink(webm_path)
-                    if os.path.exists(wav_path):
-                        os.unlink(wav_path)
-                except Exception as e:
-                    logger.error(f"Error cleaning up temporary files: {e}")
-            
-            # Verificăm dacă este mesaj text sau audio
-            if message.get("type") == "websocket.receive" and "text" in message:
-                try:
-                    text_data = json.loads(message["text"])
-                    if text_data["type"] == "text":
-                        # Generăm răspunsul pentru mesaj text
-                        ai_response = generate_ai_response(text_data["message"])
-                        response = {
-                            "type": "transcription",
-                            "text": text_data["message"],
-                            "response": ai_response
-                        }
-                        await websocket.send_json(response)
-                        continue
-                except json.JSONDecodeError:
-                    pass
-    except starlette.websockets.WebSocketDisconnect:
-        logger.info("WebSocket disconnected")
+                active_connections[client_id]["transcript"].append(message)
+                
+                # Get AI response
+                response = await rag_service.get_response(data["message"])
+                
+                # Save AI response to transcript
+                ai_message = {
+                    "sender": "ai",
+                    "name": "George",
+                    "content": response["text"],
+                    "timestamp": datetime.utcnow().isoformat()
+                }
+                active_connections[client_id]["transcript"].append(ai_message)
+                
+                # Send response to client
+                await websocket.send_json(ai_message)
+                
     except Exception as e:
         logger.error(f"WebSocket error: {str(e)}")
-        try:
-            await websocket.close()
-        except:
-            pass
     finally:
-        logger.info("WebSocket connection closed")
+        # Save transcript and close session
+        session.end_time = datetime.utcnow()
+        session.transcript = json.dumps(active_connections[client_id]["transcript"])
+        db.commit()
+        db.close()
+        
+        del active_connections[client_id]
+        await websocket.close()
+
+@app.get("/api/sessions/{user_id}")
+async def get_user_sessions(user_id: str, db: Session = Depends(get_db)):
+    sessions = db.query(ChatSession).filter(ChatSession.user_id == user_id).all()
+    return sessions
+
+@app.delete("/api/sessions/{session_id}")
+async def delete_session(session_id: str, db: Session = Depends(get_db)):
+    session = db.query(ChatSession).filter(ChatSession.id == session_id).first()
+    if session:
+        db.delete(session)
+        db.commit()
+        return {"message": "Session deleted"}
+    raise HTTPException(status_code=404, detail="Session not found")
+
+@app.on_event("startup")
+async def startup_event():
+    try:
+        # Create database tables
+        Base.metadata.create_all(bind=engine)
+        logger.info("Database tables created successfully")
+    except Exception as e:
+        logger.error(f"Error creating database tables: {str(e)}")
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="127.0.0.1", port=8000)
+    uvicorn.run(
+        app, 
+        host="0.0.0.0", 
+        port=8010, 
+        log_level="info",
+        reload=True,
+        reload_dirs=["ai_call_agent"]
+    )

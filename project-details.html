@@ -316,6 +316,10 @@
             margin-right: 20px;
         }
     </style>
+
+    <!-- New styles -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.4/css/all.min.css">
+    <link rel="stylesheet" href="/static/css/style.css">
 </head>
 
 <body class="custom-cursor">
@@ -581,59 +585,6 @@
                                     <img src="assets/images/project/project-details-content-img-1.jpg" alt="">
                                 </div>
                             </div>
-                            <div class="project-details__demo-box">
-                                <h3 class="project-details__title-2" data-en="Try AI Call Agent Demo" data-de="KI-Call-Agent Demo testen">Try AI Call Agent Demo</h3>
-                                <p class="project-details__text-3" data-en="Experience our AI-powered call system with a live demo" data-de="Erleben Sie unser KI-gesteuertes Anrufsystem mit einer Live-Demo">Experience our AI-powered call system with a live demo</p>
-                                
-                                <div class="video-call-container">
-                                    <div class="video-grid">
-                                        <div class="video-item">
-                                            <video id="localVideo" autoplay playsinline muted></video>
-                                            <div class="video-label">You</div>
-                                            <div class="audio-indicator" id="audioIndicator">
-                                                <div class="audio-bar"></div>
-                                                <div class="audio-bar"></div>
-                                                <div class="audio-bar"></div>
-                                                <div class="audio-bar"></div>
-                                                <div class="audio-bar"></div>
-                                            </div>
-                                            <div class="processing-indicator" id="processingIndicator">
-                                                Processing speech...
-                                            </div>
-                                        </div>
-                                        <div class="video-item">
-                                            <div id="aiResponse" class="ai-response"></div>
-                                            <div class="video-label">AI Agent</div>
-                                        </div>
-                                        <div class="chat-sidebar">
-                                            <div class="chat-transcript" id="chatTranscript"></div>
-                                            <div class="chat-input-container">
-                                                <input type="text" class="chat-input" id="chatInput" 
-                                                       placeholder="Type your message..." 
-                                                       onkeypress="if(event.key === 'Enter') sendMessage()">
-                                                <button class="send-button" onclick="sendMessage()">
-                                                    <i class="icon-send"></i>
-                                                </button>
-                                            </div>
-                                        </div>
-                                    </div>
-                                    
-                                    <div class="call-controls">
-                                        <button id="startCall" class="thm-btn">
-                                            <span class="icon-phone-call"></span>
-                                            <span data-en="Start Call" data-de="Anruf starten">Start Call</span>
-                                        </button>
-                                        <button id="toggleVideo" class="thm-btn" style="display:none">
-                                            <span class="icon-video"></span>
-                                            <span data-en="Toggle Video" data-de="Video umschalten">Toggle Video</span>
-                                        </button>
-                                        <button id="endCall" class="thm-btn" style="display:none">
-                                            <span class="icon-phone-call"></span>
-                                            <span data-en="End Call" data-de="Anruf beenden">End Call</span>
-                                        </button>
-                                    </div>
-                                </div>
-                            </div>
                         </div>
                     </div>
                     <div class="col-xl-4 col-lg-5">
@@ -826,6 +777,33 @@
         </footer>
         <!--Site Footer End-->
 
+        <!-- Adaugă înainte de footer -->
+        <div class="chat-button" id="chatButton">
+            <i class="fas fa-comments"></i>
+            AI Call Agent
+        </div>
+
+        <div class="chat-container" id="chatContainer" style="display: none;">
+            <div class="chat-header">
+                <h3>AI Call Agent</h3>
+                <button class="close-button" id="closeChat">&times;</button>
+            </div>
+            <div class="chat-messages" id="chatMessages"></div>
+            <div class="chat-controls">
+                <div class="chat-input">
+                    <input type="text" id="messageInput" placeholder="Type your message...">
+                    <button id="sendButton">Send</button>
+                </div>
+                <div class="voice-controls">
+                    <button id="startCall" class="call-button">
+                        <i class="fas fa-phone"></i> Start Call
+                    </button>
+                    <button id="endCall" class="call-button" style="display: none;">
+                        <i class="fas fa-phone-slash"></i> End Call
+                    </button>
+                </div>
+            </div>
+        </div>
 
     </div><!-- /.page-wrapper -->
 
@@ -914,251 +892,7 @@
 
     <!-- template js -->
     <script src="assets/js/zefxa.js"></script>
-    <script>
-        // Language handling
-        const languageSelect = document.getElementById('languageSelect');
-        let currentLanguage = 'en';
-        
-        function updateTexts(language) {
-            document.querySelectorAll('[data-en]').forEach(element => {
-                element.textContent = element.getAttribute(`data-${language}`);
-            });
-        }
-        
-        languageSelect.addEventListener('change', (e) => {
-            currentLanguage = e.target.value;
-            updateTexts(currentLanguage);
-        });
-        
-        // Funcție globală pentru schimbarea limbii
-        function changeLanguage(lang) {
-            currentLanguage = lang;
-            updateTexts(lang);
-            
-            // Actualizăm și alte elemente din pagină care nu au atribute data-*
-            const elements = {
-                'demo-status': {
-                    en: 'Ready to start',
-                    de: 'Bereit zum Start'
-                },
-                'start-demo-btn': {
-                    en: 'Run Demo Call',
-                    de: 'Demo-Anruf starten'
-                }
-            };
-            
-            Object.keys(elements).forEach(id => {
-                const element = document.getElementById(id);
-                if (element) {
-                    element.textContent = elements[id][lang];
-                }
-            });
-        }
-        
-        // Funcție pentru a verifica starea serverului
-        async function checkServerStatus() {
-            try {
-                const response = await fetch('http://localhost:8899/health', {
-                    method: 'GET'
-                });
-                console.log("Server check response:", response.status);
-                const data = await response.json();
-                return data.status === "healthy";
-            } catch (error) {
-                console.error("Server check error:", error);
-                return false;
-            }
-        }
-
-        let mediaRecorder;
-        let audioContext;
-        let ws;
-        let audioWorkletNode;
-        
-        async function startCall() {
-            try {
-                const stream = await navigator.mediaDevices.getUserMedia({ 
-                    audio: {
-                        echoCancellation: true,
-                        noiseSuppression: true,
-                        autoGainControl: true,
-                        sampleRate: 16000,
-                        channelCount: 1
-                    },
-                    video: true
-                });
-                
-                document.getElementById('localVideo').srcObject = stream;
-                document.getElementById('startCall').style.display = 'none';
-                document.getElementById('toggleVideo').style.display = 'inline-block';
-                document.getElementById('endCall').style.display = 'inline-block';
-                
-                // Configurare analiză audio
-                const audioContext = new AudioContext();
-                const analyser = audioContext.createAnalyser();
-                const microphone = audioContext.createMediaStreamSource(stream);
-                microphone.connect(analyser);
-                analyser.fftSize = 256;
-                
-                const bufferLength = analyser.frequencyBinCount;
-                const dataArray = new Uint8Array(bufferLength);
-                
-                // Funcție pentru actualizarea indicatorului audio
-                function updateAudioIndicator() {
-                    analyser.getByteFrequencyData(dataArray);
-                    
-                    // Calculăm media nivelului audio
-                    const average = dataArray.reduce((a, b) => a + b) / bufferLength;
-                    
-                    // Actualizăm barele indicatorului
-                    const bars = document.querySelectorAll('.audio-bar');
-                    const threshold = 30; // Prag pentru activare
-                    
-                    bars.forEach((bar, index) => {
-                        const level = average / (index + 1);
-                        if (level > threshold) {
-                            bar.classList.add('audio-active');
-                            bar.style.animationDelay = `${index * 0.1}s`;
-                        } else {
-                            bar.classList.remove('audio-active');
-                        }
-                    });
-                    
-                    requestAnimationFrame(updateAudioIndicator);
-                }
-                
-                updateAudioIndicator();
-                
-                // Conectare WebSocket
-                ws = new WebSocket('ws://localhost:8899/ws/call');
-                
-                // Inițializare procesare audio
-                const mediaStreamSource = audioContext.createMediaStreamSource(stream);
-                
-                // Creăm un MediaRecorder pentru audio
-                const audioStream = new MediaStream([stream.getAudioTracks()[0]]);
-                mediaRecorder = new MediaRecorder(audioStream, {
-                    mimeType: 'audio/webm;codecs=opus',
-                    audioBitsPerSecond: 16000
-                });
-                
-                let chunks = [];
-                mediaRecorder.ondataavailable = (e) => {
-                    if (e.data.size > 0) {
-                        chunks.push(e.data);
-                    }
-                };
-                
-                mediaRecorder.onstop = async () => {
-                    if (chunks.length > 0 && ws.readyState === WebSocket.OPEN) {
-                        document.getElementById('processingIndicator').classList.add('active');
-                        const blob = new Blob(chunks, { type: 'audio/webm;codecs=opus' });
-                        const arrayBuffer = await blob.arrayBuffer();
-                        ws.send(arrayBuffer);
-                        chunks = [];
-                    }
-                    mediaRecorder.start(1000);
-                };
-                
-                // Începe înregistrarea
-                mediaRecorder.start(1000);
-                
-                // Gestionare răspunsuri
-                ws.onmessage = function(event) {
-                    const data = JSON.parse(event.data);
-                    document.getElementById('processingIndicator').classList.remove('active');
-                    if (data.type === 'transcription') {
-                        const aiResponse = document.getElementById('aiResponse');
-                        const chatTranscript = document.getElementById('chatTranscript');
-                        const timestamp = new Date().toLocaleTimeString();
-                        
-                        // Adăugăm mesajul în transcript
-                        chatTranscript.innerHTML += `
-                            <div class="message user-message">
-                                <strong>You (${timestamp}):</strong><br>
-                                ${data.text}
-                            </div>
-                            <div class="message ai-message">
-                                <strong>AI Agent (${timestamp}):</strong><br>
-                                ${data.response}
-                            </div>
-                        `;
-                        chatTranscript.scrollTop = chatTranscript.scrollHeight;
-                        
-                        aiResponse.innerHTML += `
-                            <p><strong>You (${timestamp}):</strong> ${data.text}</p>
-                            <p class="ai-message"><strong>AI Agent (${timestamp}):</strong> ${data.response}</p>
-                        `;
-                        aiResponse.scrollTop = aiResponse.scrollHeight;
-                        
-                        // Efect de highlight pentru răspunsul AI
-                        const lastMessage = aiResponse.lastElementChild;
-                        lastMessage.style.backgroundColor = '#f0f8ff';
-                        setTimeout(() => {
-                            lastMessage.style.backgroundColor = 'transparent';
-                        }, 1000);
-                    }
-                };
-            } catch (error) {
-                console.error('Error starting call:', error);
-            }
-        }
-        
-        document.getElementById('startCall').addEventListener('click', startCall);
-        
-        document.getElementById('toggleVideo').addEventListener('click', async function() {
-            const localVideo = document.getElementById('localVideo');
-            const stream = localVideo.srcObject;
-            const videoTrack = stream.getVideoTracks()[0];
-            videoTrack.enabled = !videoTrack.enabled;
-        });
-        
-        document.getElementById('endCall').addEventListener('click', function() {
-            if (ws) ws.close();
-            if (audioContext) audioContext.close();
-            if (mediaRecorder && mediaRecorder.state !== 'inactive') {
-                mediaRecorder.stop();
-            }
-            
-            const localVideo = document.getElementById('localVideo');
-            if (localVideo.srcObject) {
-                localVideo.srcObject.getTracks().forEach(track => track.stop());
-            }
-            
-            document.getElementById('startCall').style.display = 'inline-block';
-            document.getElementById('toggleVideo').style.display = 'none';
-            document.getElementById('endCall').style.display = 'none';
-        });
-
-        // Funcție pentru trimiterea mesajelor text
-        async function sendMessage() {
-            const chatInput = document.getElementById('chatInput');
-            const message = chatInput.value.trim();
-            
-            if (message && ws && ws.readyState === WebSocket.OPEN) {
-                const timestamp = new Date().toLocaleTimeString();
-                const chatTranscript = document.getElementById('chatTranscript');
-                
-                // Adăugăm mesajul utilizatorului în transcript
-                chatTranscript.innerHTML += `
-                    <div class="message user-message">
-                        <strong>You (${timestamp}):</strong><br>
-                        ${message}
-                    </div>
-                `;
-                
-                // Trimitem mesajul către server
-                ws.send(JSON.stringify({
-                    type: 'text',
-                    message: message
-                }));
-                
-                // Curățăm input-ul
-                chatInput.value = '';
-                chatTranscript.scrollTop = chatTranscript.scrollHeight;
-            }
-        }
-    </script>
+    <script src="/static/js/chat.js"></script>
 </body>
 
 </html>

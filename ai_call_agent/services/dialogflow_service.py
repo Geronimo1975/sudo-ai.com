@@ -1,10 +1,12 @@
 from google.cloud.dialogflowcx import SessionsClient
 from google.cloud.dialogflowcx import TextInput, QueryInput
+from typing import Dict, Any
 import os
 from dotenv import load_dotenv
 import logging
 import uuid
 
+logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 class DialogflowService:
@@ -14,6 +16,11 @@ class DialogflowService:
         self.location = os.getenv("DIALOGFLOW_LOCATION")
         self.agent_id = os.getenv("DIALOGFLOW_AGENT_ID")
         
+        logger.info(f"Initializing DialogflowService with:")
+        logger.info(f"Project ID: {self.project_id}")
+        logger.info(f"Location: {self.location}")
+        logger.info(f"Agent ID: {self.agent_id}")
+        
         if not all([self.project_id, self.agent_id]):
             raise ValueError("Missing required Dialogflow CX configuration")
         
@@ -21,21 +28,32 @@ class DialogflowService:
         client_options = {"api_endpoint": f"{self.location}-dialogflow.googleapis.com"}
         self.session_client = SessionsClient(client_options=client_options)
     
-    def get_response(self, text, session_id):
+    def get_response(self, text: str, session_id: str) -> Dict[str, Any]:
         """
         Get response from Dialogflow CX for a given text input
+        
+        Args:
+            text (str): The input text from the user
+            session_id (str): The session identifier
+            
+        Returns:
+            Dict[str, Any]: The response containing text, intent, and confidence
         """
         try:
+            logger.info(f"Getting response for text: {text}")
             session_path = self.session_client.session_path(
                 self.project_id, self.location, self.agent_id, session_id
             )
+            logger.info(f"Session path: {session_path}")
             
             text_input = TextInput(text=text)
             query_input = QueryInput(text=text_input, language_code="en-US")
             
+            logger.info("Sending request to Dialogflow...")
             response = self.session_client.detect_intent(
                 request={"session": session_path, "query_input": query_input}
             )
+            logger.info("Received response from Dialogflow")
             
             return {
                 "text": response.query_result.response_messages[0].text.text[0],
@@ -44,7 +62,7 @@ class DialogflowService:
             }
             
         except Exception as e:
-            print(f"Error in Dialogflow service: {str(e)}")
+            logger.error(f"Error in Dialogflow service: {str(e)}")
             return {"error": str(e)}
 
     def detect_intent(
