@@ -1,0 +1,4 @@
+# Redirect from root to index3.html
+DirectoryIndex index3.html index.html
+# SAU
+# Redirect 301 / /index3.html 
